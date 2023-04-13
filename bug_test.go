@@ -34,7 +34,8 @@ func TestBugSQLite(t *testing.T) {
 			if err != nil {
 				return nil, err
 			}
-			return next.Query(ctx, q)
+			_ = q
+			return next.Query(ctx, query)
 		})
 	})
 	client.Intercept(interceptor)
