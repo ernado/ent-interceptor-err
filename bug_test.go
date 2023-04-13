@@ -2,56 +2,44 @@ package bug
 
 import (
 	"context"
-	"fmt"
-	"net"
-	"strconv"
 	"testing"
 
 	"entgo.io/ent/dialect"
-	_ "github.com/go-sql-driver/mysql"
-	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
+	"go.opentelemetry.io/otel/trace"
 
 	"entgo.io/bug/ent"
 	"entgo.io/bug/ent/enttest"
+	"entgo.io/bug/ent/intercept"
+	_ "entgo.io/bug/ent/runtime"
 )
 
 func TestBugSQLite(t *testing.T) {
+	tracer := trace.NewNoopTracerProvider().Tracer("")
+
 	client := enttest.Open(t, dialect.SQLite, "file:ent?mode=memory&cache=shared&_fk=1")
-	defer client.Close()
+	t.Cleanup(func() {
+		_ = client.Close()
+	})
+
+	// Instrument reads.
+	interceptor := ent.InterceptFunc(func(next ent.Querier) ent.Querier {
+		return ent.QuerierFunc(func(ctx context.Context, query ent.Query) (ent.Value, error) {
+			// Get a generic query from a typed-query.
+			ctx, span := tracer.Start(ctx, "Query",
+				trace.WithSpanKind(trace.SpanKindClient),
+			)
+			defer span.End()
+			q, err := intercept.NewQuery(query)
+			if err != nil {
+				return nil, err
+			}
+			return next.Query(ctx, q)
+		})
+	})
+	client.Intercept(interceptor)
+
 	test(t, client)
-}
-
-func TestBugMySQL(t *testing.T) {
-	for version, port := range map[string]int{"56": 3306, "57": 3307, "8": 3308} {
-		addr := net.JoinHostPort("localhost", strconv.Itoa(port))
-		t.Run(version, func(t *testing.T) {
-			client := enttest.Open(t, dialect.MySQL, fmt.Sprintf("root:pass@tcp(%s)/test?parseTime=True", addr))
-			defer client.Close()
-			test(t, client)
-		})
-	}
-}
-
-func TestBugPostgres(t *testing.T) {
-	for version, port := range map[string]int{"10": 5430, "11": 5431, "12": 5432, "13": 5433, "14": 5434} {
-		t.Run(version, func(t *testing.T) {
-			client := enttest.Open(t, dialect.Postgres, fmt.Sprintf("host=localhost port=%d user=postgres dbname=test password=pass sslmode=disable", port))
-			defer client.Close()
-			test(t, client)
-		})
-	}
-}
-
-func TestBugMaria(t *testing.T) {
-	for version, port := range map[string]int{"10.5": 4306, "10.2": 4307, "10.3": 4308} {
-		t.Run(version, func(t *testing.T) {
-			addr := net.JoinHostPort("localhost", strconv.Itoa(port))
-			client := enttest.Open(t, dialect.MySQL, fmt.Sprintf("root:pass@tcp(%s)/test?parseTime=True", addr))
-			defer client.Close()
-			test(t, client)
-		})
-	}
 }
 
 func test(t *testing.T, client *ent.Client) {

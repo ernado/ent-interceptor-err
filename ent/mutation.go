@@ -10,9 +10,8 @@ import (
 
 	"entgo.io/bug/ent/predicate"
 	"entgo.io/bug/ent/user"
-	"entgo.io/ent/dialect/sql"
-
 	"entgo.io/ent"
+	"entgo.io/ent/dialect/sql"
 )
 
 const (
